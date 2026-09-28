@@ -75,6 +75,21 @@ HIGH_ENTROPY_THRESHOLD = 4.5
 # numerical characters.
 MIN_DIGIT_COUNT = 2
 
+# High-entropy strings are only reported as *suspected string encryption* when
+# they are both numerous and a meaningful share of the string pool.
+#
+# Presence alone is worthless as a signal: embedded resources, fonts, icons,
+# certificates and base64 in third-party libraries all produce them. Measured
+# examples -- a FOSS notes app produced 4 of 22,586 strings (0.02%) and the
+# F-Droid client 1,184 of 122,586 (0.97%) -- so a "count > 0" test, which is
+# what this used to be downstream, flagged both as encrypted.
+#
+# NOTE: these two numbers are a reasoned starting point, not a calibrated
+# result. They should be revisited against a labelled corpus; a genuinely
+# string-encrypted payload typically hides a large share of its own strings.
+MIN_ENTROPY_FINDINGS = 25
+MIN_ENTROPY_RATIO = 0.02
+
 
 # ---------------------------------------------------------------------------
 # Known framework/library namespaces
@@ -543,6 +558,27 @@ def detect_high_entropy_strings(loaded: LoadedAPK) -> List[Dict[str, object]]:
     return results
 
 
+def count_dex_strings(loaded: LoadedAPK) -> int:
+    """Total DEX string constants, the denominator for entropy ratios."""
+    return sum(len(dex.get_strings()) for dex in loaded.dex_files)
+
+
+def suspected_string_encryption(high_entropy_count: int, strings_examined: int) -> bool:
+    """
+    Decide whether high-entropy strings are numerous enough to suggest that
+    the application encrypts its own strings.
+
+    Requires both an absolute floor and a share of the string pool, so that
+    neither a large application full of legitimate encoded resources nor a
+    tiny application with a handful of blobs is flagged.
+    """
+    if not strings_examined:
+        return False
+    if high_entropy_count < MIN_ENTROPY_FINDINGS:
+        return False
+    return (high_entropy_count / strings_examined) >= MIN_ENTROPY_RATIO
+
+
 # ============================================================================
 # Native library detection + packer fingerprinting
 # ============================================================================
@@ -665,18 +701,29 @@ def analyze_obfuscation(loaded: LoadedAPK) -> Dict[str, object]:
     high_entropy = detect_high_entropy_strings(loaded)
     native_libraries = detect_native_libraries(loaded)
     secondary_payloads = detect_secondary_payloads(loaded)
+    strings_examined = count_dex_strings(loaded)
+
+    high_entropy_summary = {
+        "threshold": HIGH_ENTROPY_THRESHOLD,
+        "minimum_length": MIN_ENTROPY_STRING_LENGTH,
+        "count": len(high_entropy),
+        "strings_examined": strings_examined,
+        "ratio": (round(len(high_entropy) / strings_examined, 5)
+                  if strings_examined else 0.0),
+        "minimum_findings": MIN_ENTROPY_FINDINGS,
+        "minimum_ratio": MIN_ENTROPY_RATIO,
+        "findings": high_entropy,
+    }
+    high_entropy_summary["suspected_string_encryption"] = suspected_string_encryption(
+        high_entropy_summary["count"], strings_examined
+    )
 
     return {
         "application_package": package_name,
 
         "proguard_obfuscation": short_names,
 
-        "high_entropy_strings": {
-            "threshold": HIGH_ENTROPY_THRESHOLD,
-            "minimum_length": MIN_ENTROPY_STRING_LENGTH,
-            "count": len(high_entropy),
-            "findings": high_entropy,
-        },
+        "high_entropy_strings": high_entropy_summary,
 
         "native_libraries": native_libraries,
 

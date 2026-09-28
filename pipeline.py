@@ -42,7 +42,11 @@ def analyze_apk(path):
     if ratio >= .5:
         indicators.append(f'Short class names: {short["short_class_ratio"]:.0%}; short method names: {short["short_method_ratio"]:.0%}')
     if obf['high_entropy_strings']['count']:
-        indicators.append(f'{obf["high_entropy_strings"]["count"]} high-entropy strings')
+        entropy = obf["high_entropy_strings"]
+        indicators.append(
+            f'{entropy["count"]} high-entropy strings '
+            f'({entropy["ratio"]:.2%} of {entropy["strings_examined"]} strings)'
+        )
     for packer in obf['native_libraries']['known_packers_detected']:
         indicators.append(f'Known packer: {packer}')
     if obf['secondary_payloads']['present']:
@@ -75,7 +79,12 @@ def analyze_apk(path):
                  'native_libraries': [{'name': name, 'architectures': abis} for name, abis in sorted(native.items())],
                  'obfuscation': {'is_obfuscated': ratio >= .5 or bool(obf['native_libraries']['known_packers_detected']),
                      'short_name_ratio': ratio, 'reflection_used': 'reflection' in api_hits,
-                     'string_encryption_suspected': bool(obf['high_entropy_strings']['count']), 'indicators': indicators}},
+                     # Note: this is not "any high-entropy string". See
+                     # obfuscation_heuristics.MIN_ENTROPY_RATIO -- presence
+                     # alone flagged every real app as string-encrypted.
+                     'string_encryption_suspected': bool(
+                         obf['high_entropy_strings'].get('suspected_string_encryption')),
+                     'indicators': indicators}},
         'analysis_metadata': {'analyzed_at': datetime.now(timezone.utc).isoformat(), 'warnings': warnings, 'errors': []},
         'raw_findings': {'ingestion': parsed, 'sensitive_apis': api_hits, 'obfuscation': obf},
     }

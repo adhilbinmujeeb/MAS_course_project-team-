@@ -26,7 +26,11 @@ except ImportError:
 # --- Regex patterns -----------------------------------------------------
 
 URL_RE = re.compile(r"https?://[^\s\"'<>]+")
-IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# The lookarounds require a *complete* dotted-decimal run. A plain \b matches
+# the first four numbers of a longer run, which turned X.509/ASN.1 object
+# identifiers into "IP addresses": "1.3.6.1.4.1.44" produced "1.3.6.1", and
+# the F-Droid client alone yielded 141 such pseudo-IPs.
+IP_RE = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 # Base64-looking blobs: long runs of base64 alphabet, optionally padded.
 # Length threshold (40+) filters out short strings that just happen to

@@ -42,7 +42,13 @@ SENSITIVE_APIS: Dict[str, List[str]] = {
         "DexClassLoader;",
         "PathClassLoader;",
         "InMemoryDexClassLoader;",
-        "ClassLoader; loadClass",
+        # NOTE: "ClassLoader; loadClass" was removed deliberately. The base
+        # ClassLoader is the standard class-resolution path used by every
+        # non-trivial Android app (AndroidX, Compose, Kotlin reflection), so
+        # including it flagged essentially every real application -- a
+        # FOSS notes app and the F-Droid client among them. Genuinely
+        # suspicious loading goes through the file-backed loaders above,
+        # which remain listed.
     ],
     "reflection": [
         "Method; invoke",
