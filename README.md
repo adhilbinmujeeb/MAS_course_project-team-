@@ -47,11 +47,111 @@ for separate scans; command-line output filenames are overwritten on reruns.
 - `pipeline.py`: orchestration and conversion to the scoring module's shared JSON schema.
 - `run.py`: dashboard launcher.
 - `anzal_android-malware-framework/android-malware-framework/`: feature normalization,
-  configurable scoring, Flask routes, templates, and report generation.
+  configurable scoring, app-category context, Flask routes, templates, and report generation.
+- `anzal_android-malware-framework/android-malware-framework/app_category.py`: the app-category
+  taxonomy, category inference, and the tier lookups context-aware scoring uses.
 
 The pipeline preserves findings that do not yet have dedicated scoring rules
 (such as archive anomalies and secondary payloads) under `raw_findings`.
 The risk score is a manual-review aid; it does not establish whether an APK is malware.
+
+## App-category context
+
+A permission is not risky in isolation: its risk depends on whether the app's
+stated purpose justifies it. `ACCESS_FINE_LOCATION` is expected in a navigation
+app and out of character in a child-directed one, so scoring both identically is
+the main source of false positives in a purely additive model.
+
+Scoring is therefore assessed against an app category, drawn from a fixed
+taxonomy of twelve: `kids`, `education`, `navigation`, `messaging`, `social`,
+`media`, `productivity`, `utilities`, `health`, `finance`, `shopping` and
+`games`. Each category lists which sensitive permissions are expected, which are
+out of character, and which are not permitted at all.
+
+Where the category comes from:
+
+- **Declared.** Put an `app_context` block in the analysis JSON. This always wins.
+- **Inferred.** With no declaration, the classifier uses a seed table of
+  well-known packages (so `com.whatsapp` is recognised as `messaging`), keyword
+  evidence from the package name and app label, and the permission/API profile.
+  A guess is applied to scoring only when it clears a confidence threshold;
+  below that the app is scored category-neutrally and the candidates are still
+  reported so a human can decide.
+
+```json
+"app_context": { "category": "education" }
+```
+
+Declaring `"unknown"` is an explicit opt-out: no inference runs for that file.
+Setting `CONTEXT_INFERENCE_ENABLED = False` in `config.py` disables inference
+globally, which reproduces the pre-upgrade category-blind numbers exactly
+(the demo files return 87 and 4).
+
+What the category changes:
+
+- The sensitive-permission finding keeps its volume cap, which bounds how much
+  "how many permissions were requested" can contribute. App context is then
+  applied as a bounded adjustment on top (`CONTEXT_PERMISSION_ADJUST_CAP`), so a
+  category can still move the finding for an app that already sits at the cap --
+  without letting permissions dominate: even fully out of character they stay
+  inside the Low band. Set the adjustment to 0 for the cap-only behaviour.
+- The SMS, command-execution and dynamic-code-loading rules scale the same way
+  for their API family.
+- A dedicated rule reports permissions that policy forbids for the category,
+  and every finding carries its tier and multiplier in the evidence so the
+  arithmetic is auditable.
+
+Compliance is kept on its own axis rather than folded into the score. The score
+remains the sum of the findings -- which is what the report explains -- but a
+policy violation is reported in its own `policy_violations` field and raises the
+reported risk band (`risk_level_basis` records whether the band came from the
+score or from the policy floor). A child-directed app requesting location or
+contacts therefore cannot be presented as a low-risk result, and the report says
+explicitly why the band was raised.
+
+`denied` permissions are deliberately limited to child-directed apps, where
+Google Play's Families policy and COPPA provide a citable basis. They are
+excluded from the permission finding so the same evidence is never counted
+twice.
+
+The dashboard and the generated report both show the category, how it was
+determined, the confidence, and the evidence behind it. Because risk is now
+relative to context, a low score means "unremarkable *for this kind of app*",
+not "safe".
+
+## Calibration against real applications
+
+The scoring path was validated by running real, known-benign applications
+through it (a FOSS notes app and the F-Droid client). That surfaced four
+false-positive sources, each of which is now fixed and covered by tests:
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| "Dynamic code loading" (+12) on almost every app | `ClassLoader; loadClass` listed as suspicious in `feature_extraction/sensitive_apis.py`, although the base class loader is the standard class-resolution path | Pattern removed; the file-backed `DexClassLoader` / `PathClassLoader` / `InMemoryDexClassLoader` patterns remain |
+| 141 "hardcoded IP addresses" in one app | `IP_RE` matched the first four numbers of a longer dotted run, so X.509/ASN.1 object identifiers were extracted as IPs (`1.3.6.1.4.1.44` produced `1.3.6.1`) | Lookarounds require a complete, delimited dotted-decimal run |
+| "Code obfuscation" (+9) on a non-obfuscated FOSS app | `string_encryption_suspected` was true whenever *any* high-entropy string existed | Requires both a count floor and a share of the string pool (`obfuscation_heuristics.MIN_ENTROPY_RATIO`) |
+| An app store scored as if installing apps were suspicious | No category described package managers | `app_store` category added, where installing and querying packages is expected |
+
+Also corrected: URL-shortener matching was substring-based, so `www.reddit.com`
+was reported as a shortened link (it contains `t.co`), and loopback URLs such as
+`http://127.0.0.1` were flagged even though `PRIVATE_IP_PREFIXES` already
+declared loopback benign for the IP rule. Exported launcher activities are now
+excluded from the exported-component finding, because Android requires an
+app's entry point to be exported.
+
+Measured effect on the two benign applications:
+
+| Application | Before | After |
+| --- | --- | --- |
+| Fossify Notes (FOSS notes app, inferred `productivity`) | 45 / Medium | **24 / Low** |
+| F-Droid client (inferred `app_store`) | 75 / High | **45 / Medium** |
+
+The remaining contributors on the F-Droid client are defensible rather than
+mistaken: a self-signed certificate (every F-Droid app has one), bundled native
+libraries, exported components, command execution (it drives the platform
+package manager), and a handful of plain-HTTP library documentation URLs. The
+entropy thresholds are a reasoned starting point, not a calibrated result --
+they should be revisited against a labelled corpus.
 
 ## Tests
 

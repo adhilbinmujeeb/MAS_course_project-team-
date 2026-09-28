@@ -22,7 +22,11 @@ def test_sensitive_api_matches_dex_descriptor():
 
 def test_json_pipeline_preserves_sample_score():
     raw, features, result = run_pipeline(FRAMEWORK_DIR / 'data/sample_suspicious.json')
-    assert result['risk_score'] == 87
+    # 87 before the app-context upgrade. The sample's label ("Battery Saver
+    # Pro") is now inferred as the 'utilities' category, which makes its SMS
+    # usage and most of its permissions out of character. See
+    # tests/test_app_category.py for the category-neutral baseline of 87.
+    assert result['risk_score'] == 100
     assert features['package_name'] == raw['apk']['package_name']
 
 
