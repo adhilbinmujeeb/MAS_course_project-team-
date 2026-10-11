@@ -29,7 +29,8 @@ def analyze_apk(path):
     api_hits = scan_sensitive_apis(loaded)
     strings = extract_strings(loaded)
     obf = analyze_obfuscation(loaded)
-    manifest = parsed['manifest']
+    from manifest_security import extract_security_manifest
+    manifest = {**parsed['manifest'], **extract_security_manifest(loaded.apk)}
     categories = {'sms_fraud': 'sms', 'shell_and_process_exec': 'command_execution',
                   'device_fingerprinting': 'device_info', 'crypto_usage': 'encoding'}
     apis = [{'api': match['api'], 'category': categories.get(category, category),
@@ -65,10 +66,7 @@ def analyze_apk(path):
     for abi, names in obf['native_libraries']['abis'].items():
         for name in names:
             native.setdefault(name, []).append(abi)
-    components = {kind: manifest[kind] for kind in ['activities', 'services', 'receivers']}
-    components['providers'] = [dict(name=name,
-        exported=str(loaded.apk.get_attribute_value('provider', 'exported', name=name) or '').lower() == 'true',
-        permission=loaded.apk.get_attribute_value('provider', 'permission', name=name)) for name in manifest['providers']]
+    components = manifest['components']
     return {
         'schema_version': '1.0',
         'apk': {**{k: parsed[k] for k in ['file_name', 'file_size_bytes', 'sha256', 'md5']},
@@ -94,7 +92,8 @@ def run_pipeline(path):
     from analyzer import build_features
     from scoring_engine import calculate_risk
     path = Path(path)
-    raw = analyze_apk(path) if path.suffix.lower() == '.apk' else json.loads(path.read_text(encoding='utf-8'))
+    from analyzer import load_analysis
+    raw = analyze_apk(path) if path.suffix.lower() == '.apk' else load_analysis(path)
     features = build_features(raw)
     return raw, features, calculate_risk(features)
 
