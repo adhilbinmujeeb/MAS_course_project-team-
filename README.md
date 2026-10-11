@@ -1,6 +1,6 @@
 # Android Malware Static Analysis Framework
 
-A completed course project for analyzing Android APKs through a single static-analysis pipeline. The framework combines APK ingestion, manifest and signing inspection, DEX feature extraction, category-aware risk scoring, finding correlation, an interactive dashboard, and downloadable HTML security reports.
+A completed project for analyzing Android APKs through a single static-analysis pipeline. The framework combines APK ingestion, manifest and signing inspection, DEX feature extraction, category-aware risk scoring, finding correlation, an interactive dashboard, and downloadable HTML security reports.
 
 Analysis reads APK archives and bytecode without installing or executing the application. Results explain the evidence behind each finding and provide review steps for possible attack paths. The implementation is complete for this scope; its heuristic scores and correlations are not a validated malware classifier.
 
