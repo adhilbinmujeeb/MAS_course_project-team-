@@ -5,7 +5,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-FRAMEWORK_DIR = Path(__file__).resolve().parent / 'anzal_android-malware-framework' / 'android-malware-framework'
+FRAMEWORK_DIR = Path(__file__).resolve().parent / 'Framework' / 'android-malware-framework'
 sys.path.insert(0, str(FRAMEWORK_DIR))
 
 

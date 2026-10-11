@@ -26,7 +26,7 @@ Use **Generate Security Report** to view, download, or print the report to PDF.
 
 ```bash
 python pipeline.py /path/to/app.apk -o output/my-app
-python pipeline.py anzal_android-malware-framework/android-malware-framework/data/sample_suspicious.json -o output/demo
+python pipeline.py Framework/android-malware-framework/data/sample_suspicious.json -o output/demo
 ```
 
 Each output directory contains:
@@ -46,14 +46,47 @@ for separate scans; command-line output filenames are overwritten on reruns.
 - `feature_extraction/`: APK loading, API cross-references, strings, obfuscation and payload detection.
 - `pipeline.py`: orchestration and conversion to the scoring module's shared JSON schema.
 - `run.py`: dashboard launcher.
-- `anzal_android-malware-framework/android-malware-framework/`: feature normalization,
+- `Framework/android-malware-framework/`: feature normalization,
   configurable scoring, app-category context, Flask routes, templates, and report generation.
-- `anzal_android-malware-framework/android-malware-framework/app_category.py`: the app-category
+- `Framework/android-malware-framework/app_category.py`: the app-category
   taxonomy, category inference, and the tier lookups context-aware scoring uses.
 
 The pipeline preserves findings that do not yet have dedicated scoring rules
 (such as archive anomalies and secondary payloads) under `raw_findings`.
 The risk score is a manual-review aid; it does not establish whether an APK is malware.
+
+## Finding correlation
+
+Matching conditions and interpretations now live in
+`Framework/android-malware-framework/correlation_rules.json`; the evaluator is
+`correlation_engine.py`. Each result includes the catalog version, evidence
+level, reference mappings and an explicit `unvalidated` status. References from
+Android, OWASP and MITRE support underlying capabilities or related threats;
+they do not prove these exact heuristics or a malicious execution path.
+Permission-only results are labeled as declared capabilities. Confidence and
+potential impact are qualitative/manual; no measured probabilities are claimed.
+See [the catalog guide](Framework/android-malware-framework/CORRELATION_RULES.md)
+for editing, source interpretation, constraints and the validation procedure.
+
+The dashboard, generated HTML report and `risk.json` now include possible
+attack paths (`attack_paths`). Correlation requires multiple supporting signals:
+SMS permission plus a sending API; data-access permission and a related API
+plus Internet access and a suspicious endpoint; secondary code plus a dynamic
+loader; or an unprotected exported component whose class references a sensitive
+operation. Each hypothesis lists its evidence, potential impact, sequence and
+verification steps. App category is included for reviewer context.
+
+Permission-only combinations also cover SMS interception, audio/video capture,
+background tracking, and overlay-assisted installation. API combinations cover
+dynamic loading with reflection or shell execution. The report labels the
+correlation type. Permission-only and unrelated API combinations have low
+confidence; API combinations sharing an exact caller have moderate confidence.
+
+These are static hypotheses, not confirmed execution
+paths. Runtime permission grants, entry-point reachability, endpoint use and
+source-to-sink data flow still need verification. Correlations do not add risk
+points, so the same underlying findings are not counted twice. No matched path
+does not establish safety; coverage is limited to the supported combinations.
 
 ## App-category context
 
