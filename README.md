@@ -1,13 +1,109 @@
 # Android Malware Static Analysis Framework
 
-The integrated pipeline accepts an APK, parses its manifest and signing data,
-extracts DEX features with Androguard, normalizes the results into schema v1.0,
-calculates an explainable risk score, and generates an HTML security report.
-APK code is never installed or executed.
+A completed course project for analyzing Android APKs through a single static-analysis pipeline. The framework combines APK ingestion, manifest and signing inspection, DEX feature extraction, category-aware risk scoring, finding correlation, an interactive dashboard, and downloadable HTML security reports.
 
-## Setup and dashboard
+Analysis reads APK archives and bytecode without installing or executing the application. Results explain the evidence behind each finding and provide review steps for possible attack paths. The implementation is complete for this scope; its heuristic scores and correlations are not a validated malware classifier.
 
-Run from the repository root (Python 3.10 or newer):
+## Contents
+
+- [Features](#features)
+- [Architecture and repository structure](#architecture-and-repository-structure)
+- [Requirements and installation](#requirements-and-installation)
+- [Dashboard](#dashboard)
+- [Command-line usage](#command-line-usage)
+- [Data and output formats](#data-and-output-formats)
+- [Risk scoring and app context](#risk-scoring-and-app-context)
+- [Finding correlation](#finding-correlation)
+- [Configuration](#configuration)
+- [Testing](#testing)
+- [Limitations and troubleshooting](#limitations-and-troubleshooting)
+
+## Features
+
+| Area | Implemented capabilities |
+| --- | --- |
+| APK ingestion | Archive validation, file size, SHA-256 and MD5 hashes, parse status and error reporting |
+| Manifest inspection | Package and version metadata, SDK levels, permissions, activities, services, receivers, providers, intent filters and exported-component information |
+| Signing inspection | Signing-scheme identification, certificate metadata, debug-certificate and self-signed-certificate indicators |
+| DEX analysis | Sensitive API references, API categories, counts and calling methods through Androguard |
+| String extraction | URLs, IP addresses and strings used by the analysis and scoring stages |
+| Obfuscation and payload inspection | Short-name ratios, high-entropy string indicators, native libraries, known packer indicators and embedded secondary code |
+| Structural inspection | Duplicate ZIP entries, archive anomalies and suspicious embedded files |
+| Risk assessment | Configurable rule weights, evidence and reasons, bounded permission contributions, risk bands and category-aware adjustments |
+| Correlation | Catalog-defined permission, API, endpoint, payload and component associations with evidence levels and verification steps |
+| Presentation | Flask dashboard, score and evidence charts, JSON results, self-contained HTML security reports and browser printing to PDF |
+
+Individual indicators can occur in legitimate applications. The framework presents them for review rather than treating each one as proof of malicious behavior.
+
+## Architecture and repository structure
+
+The shared pipeline follows this sequence:
+
+1. Validate and parse the APK with `apk_parser.py`.
+2. Extract API, string and obfuscation features with `feature_extraction/`.
+3. Build schema v1.0 analysis data and normalize it with `analyzer.py`.
+4. Determine app-category context and calculate the explainable risk score.
+5. Evaluate `correlation_rules.json` against the normalized features.
+6. Display the results in the dashboard or write JSON and HTML artifacts.
+
+Existing analysis JSON can enter at the normalization stage without repeating APK extraction.
+
+```text
+MAS/
+|-- apk_parser.py
+|-- pipeline.py
+|-- run.py
+|-- requirements.txt
+|-- pytest.ini
+|-- test_apk_parser.py
+|-- feature_extraction/
+|-- tests/
+|-- samples/
+|   |-- org.fdroid.fdroid.apk
+|   `-- org.fossify.notes.apk
+|-- Framework/android-malware-framework/
+|   |-- analyzer.py
+|   |-- app.py
+|   |-- app_category.py
+|   |-- config.py
+|   |-- scoring_engine.py
+|   |-- correlation_engine.py
+|   |-- correlation_rules.json
+|   |-- CORRELATION_RULES.md
+|   |-- report_generator.py
+|   |-- data/
+|   |   |-- sample_benign.json
+|   |   |-- sample_suspicious.json
+|   |   `-- uploads/                  # Created at runtime
+|   |-- reports/                      # Generated dashboard reports
+|   |-- static/
+|   |-- templates/
+|   `-- tests/
+`-- output/                           # Default CLI output directory
+```
+
+Virtual environments, caches, uploaded analysis files and generated output/report artifacts are excluded from Git by `.gitignore`.
+
+## Requirements and installation
+
+- Python 3.10 or newer.
+- A browser for the dashboard and HTML reports.
+- Python dependencies from the root `requirements.txt`: Androguard 4.x, Flask 3.0.3 and pytest 8.3.2.
+
+Run all commands from the repository root.
+
+### Windows PowerShell
+
+```powershell
+cd D:\MAS
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe run.py
+```
+
+Using the environment's Python directly avoids requiring PowerShell activation.
+
+### Linux or macOS
 
 ```bash
 python3 -m venv .venv
@@ -16,333 +112,223 @@ python -m pip install -r requirements.txt
 python run.py
 ```
 
-Open http://127.0.0.1:5000. Upload an `.apk` for the full pipeline, or a
-previous analysis `.json`. Uploads are limited to 100 MB. APK analysis runs
-synchronously, so large APKs may take some time. The uploaded APK is removed
-when processing finishes; the generated JSON remains available in the dashboard.
-Use **Generate Security Report** to view, download, or print the report to PDF.
+The commands below use `python`; on Windows, substitute `.\.venv\Scripts\python.exe` when the virtual environment is not activated.
 
-## Command-line pipeline
+## Dashboard
+
+Start the dashboard with:
 
 ```bash
-python pipeline.py /path/to/app.apk -o output/my-app
-python pipeline.py Framework/android-malware-framework/data/sample_suspicious.json -o output/demo
+python run.py
 ```
 
-Each output directory contains:
+Open **http://127.0.0.1:5000**.
 
-- `analysis.json`: normalized input for scoring, plus original parser and extraction findings.
-- `risk.json`: score, risk band, matched rules, evidence, and warnings.
-- `report.html`: self-contained report for offline viewing or printing.
+1. Choose a bundled JSON example or upload an `.apk` or analysis `.json`.
+2. Review the risk score, risk band, matched rules, app context, permissions, APIs, endpoints and other evidence.
+3. Review possible attack paths, their supporting signals, reference mappings and verification steps.
+4. Select **Generate Security Report** to view the report, download its HTML copy or print it to PDF through the browser.
 
-Invalid APKs or failed DEX analysis return a nonzero exit code instead of
-producing a misleading low-risk assessment. Failed certificate parsing and
-known packers are reported as warnings. Preserve separate output directories
-for separate scans; command-line output filenames are overwritten on reruns.
+Uploads are limited to **100 MB**. APK analysis is synchronous, so larger files can take longer. Uploaded APKs are removed when processing finishes, including when extraction fails. Successful APK analysis is stored as JSON under `Framework/android-malware-framework/data/uploads/`; JSON uploads are retained there. Generated dashboard reports are saved under the framework's `reports/` directory.
 
-## Module layout
+Custom address and port:
 
-- `apk_parser.py`: archive validation, metadata, manifest, signatures, assets, anomalies.
-- `feature_extraction/`: APK loading, API cross-references, strings, obfuscation and payload detection.
-- `pipeline.py`: orchestration and conversion to the scoring module's shared JSON schema.
-- `run.py`: dashboard launcher.
-- `Framework/android-malware-framework/`: feature normalization,
-  configurable scoring, app-category context, Flask routes, templates, and report generation.
-- `Framework/android-malware-framework/app_category.py`: the app-category
-  taxonomy, category inference, and the tier lookups context-aware scoring uses.
+```bash
+python run.py --host 127.0.0.1 --port 5001
+```
 
-The pipeline preserves findings that do not yet have dedicated scoring rules
-(such as archive anomalies and secondary payloads) under `raw_findings`.
-The risk score is a manual-review aid; it does not establish whether an APK is malware.
+The bundled server is intended for local project use. It has no authentication or production deployment configuration.
 
-## Finding correlation
+### Web routes
 
-Matching conditions and interpretations now live in
-`Framework/android-malware-framework/correlation_rules.json`; the evaluator is
-`correlation_engine.py`. Each result includes the catalog version, evidence
-level, reference mappings and an explicit `unvalidated` status. References from
-Android, OWASP and MITRE support underlying capabilities or related threats;
-they do not prove these exact heuristics or a malicious execution path.
-Permission-only results are labeled as declared capabilities. Confidence and
-potential impact are qualitative/manual; no measured probabilities are claimed.
-See [the catalog guide](Framework/android-malware-framework/CORRELATION_RULES.md)
-for editing, source interpretation, constraints and the validation procedure.
+| Route | Purpose |
+| --- | --- |
+| `GET /` | List available analyses and show the upload form |
+| `POST /upload` | Upload an APK or JSON using the multipart field `analysis_file` |
+| `GET /analyze?file=<relative-json-path>` | Display an existing analysis |
+| `GET /api/analyze?file=<relative-json-path>` | Return its risk result as JSON |
+| `GET /report?file=<relative-json-path>` | Generate, save and display a security report |
+| `GET /reports/<filename>` | Download a saved HTML report |
 
-The dashboard, generated HTML report and `risk.json` now include possible
-attack paths (`attack_paths`). Correlation requires multiple supporting signals:
-SMS permission plus a sending API; data-access permission and a related API
-plus Internet access and a suspicious endpoint; secondary code plus a dynamic
-loader; or an unprotected exported component whose class references a sensitive
-operation. Each hypothesis lists its evidence, potential impact, sequence and
-verification steps. App category is included for reviewer context.
+The `file` parameter is relative to the framework's `data/` directory, for example `sample_suspicious.json` or `uploads/<saved-name>.json`. It does not accept arbitrary filesystem paths.
 
-Permission-only combinations also cover SMS interception, audio/video capture,
-background tracking, and overlay-assisted installation. API combinations cover
-dynamic loading with reflection or shell execution. The report labels the
-correlation type. Permission-only and unrelated API combinations have low
-confidence; API combinations sharing an exact caller have moderate confidence.
+## Command-line usage
 
-These are static hypotheses, not confirmed execution
-paths. Runtime permission grants, entry-point reachability, endpoint use and
-source-to-sink data flow still need verification. Correlations do not add risk
-points, so the same underlying findings are not counted twice. No matched path
-does not establish safety; coverage is limited to the supported combinations.
+### Full APK-to-report pipeline
 
-## App-category context
+```bash
+python pipeline.py samples/org.fossify.notes.apk -o output/fossify-notes
+python pipeline.py samples/org.fdroid.fdroid.apk -o output/fdroid
+```
 
-A permission is not risky in isolation: its risk depends on whether the app's
-stated purpose justifies it. `ACCESS_FINE_LOCATION` is expected in a navigation
-app and out of character in a child-directed one, so scoring both identically is
-the main source of false positives in a purely additive model.
+### Re-score existing JSON or try a bundled example
 
-Scoring is therefore assessed against an app category, drawn from a fixed
-taxonomy of twelve: `kids`, `education`, `navigation`, `messaging`, `social`,
-`media`, `productivity`, `utilities`, `health`, `finance`, `shopping` and
-`games`. Each category lists which sensitive permissions are expected, which are
-out of character, and which are not permitted at all.
+```bash
+python pipeline.py Framework/android-malware-framework/data/sample_suspicious.json -o output/demo
+python pipeline.py Framework/android-malware-framework/data/sample_benign.json -o output/benign-demo
+```
 
-Where the category comes from:
+Each successful run prints the score and risk band and writes:
 
-- **Declared.** Put an `app_context` block in the analysis JSON. This always wins.
-- **Inferred.** With no declaration, the classifier uses a seed table of
-  well-known packages (so `com.whatsapp` is recognised as `messaging`), keyword
-  evidence from the package name and app label, and the permission/API profile.
-  A guess is applied to scoring only when it clears a confidence threshold;
-  below that the app is scored category-neutrally and the candidates are still
-  reported so a human can decide.
+| File | Contents |
+| --- | --- |
+| `analysis.json` | Analysis input used for normalization and scoring; APK runs also preserve original parser and extraction findings |
+| `risk.json` | Score, risk band, rule contributions, app context, policy findings, correlations and warnings |
+| `report.html` | Self-contained security report for offline viewing or browser printing |
+
+The default output directory is `output/`. Use separate directories for separate scans: rerunning a command in the same directory overwrites these three filenames. Invalid APKs and failed DEX extraction return a nonzero exit code instead of producing an incomplete low-risk assessment.
+
+### Parser-only inspection
+
+```bash
+python apk_parser.py samples/org.fossify.notes.apk
+python apk_parser.py samples/org.fossify.notes.apk -o output/parser-result.json
+```
+
+Create the destination directory first when saving parser output. Parser-only output is ingestion data; use `pipeline.py` for the complete scoring and reporting workflow. The parser exits with `0` on success and `1` for an invalid APK or parse failure.
+
+### Score analysis JSON without generating a report
+
+```bash
+python Framework/android-malware-framework/scoring_engine.py Framework/android-malware-framework/data/sample_suspicious.json
+```
+
+## Data and output formats
+
+The integrated analysis format has `schema_version: "1.0"`. The bundled [benign example](Framework/android-malware-framework/data/sample_benign.json) and [suspicious example](Framework/android-malware-framework/data/sample_suspicious.json) provide complete sample inputs.
+
+| Analysis section | Contents |
+| --- | --- |
+| `apk` | Filename, hashes, size, package, label, version and SDK metadata |
+| `manifest` | Permissions, components and selected certificate information |
+| `code` | Strings, URLs, IPs, sensitive APIs with callers, native libraries and obfuscation indicators |
+| `analysis_metadata` | Analysis timestamp, warnings and errors |
+| `raw_findings` | Original ingestion, sensitive API and obfuscation results |
+| `app_context` | Optional declared category, overriding category inference |
+
+Parser-only JSON includes `file_name`, `file_size_bytes`, `sha256`, `md5`, `status` and `error`. Successful parsing adds `manifest`, `certificates`, `signature_schemes`, `is_signed`, `assets_and_resources` and `structural_anomalies`. Status is `success`, `invalid` or `parse_error`; failed results include an explanation.
+
+Risk results include `risk_score`, `raw_score`, `max_score`, `risk_level`, `risk_level_basis`, `matched_rules`, `policy_violations` and `attack_paths`, together with application/context metadata and warnings. Findings without a dedicated scoring rule remain available in `raw_findings`.
+
+## Risk scoring and app context
+
+The reported score is capped at **100**. Matched rules explain their points, reasons and supporting evidence. Default score bands are:
+
+| Score | Band |
+| --- | --- |
+| 0-25 | Low |
+| 26-50 | Medium |
+| 51-75 | High |
+| 76-100 | Critical |
+
+Scoring covers sensitive permissions, SMS APIs, command execution, dynamic code loading, suspicious URLs, public IP addresses, obfuscation, certificate indicators, native libraries and unprotected exported components. Permission-volume contributions and category adjustments are bounded.
+
+App context distinguishes expected capabilities from capabilities that are unusual for the application's purpose. The current taxonomy contains **13 categories**:
+
+`kids`, `education`, `navigation`, `messaging`, `social`, `media`, `productivity`, `utilities`, `app_store`, `health`, `finance`, `shopping` and `games`.
+
+Declare a category by adding this top-level field to analysis JSON:
 
 ```json
-"app_context": { "category": "education" }
-```
-
-Declaring `"unknown"` is an explicit opt-out: no inference runs for that file.
-Setting `CONTEXT_INFERENCE_ENABLED = False` in `config.py` disables inference
-globally, which reproduces the pre-upgrade category-blind numbers exactly
-(the demo files return 87 and 4).
-
-What the category changes:
-
-- The sensitive-permission finding keeps its volume cap, which bounds how much
-  "how many permissions were requested" can contribute. App context is then
-  applied as a bounded adjustment on top (`CONTEXT_PERMISSION_ADJUST_CAP`), so a
-  category can still move the finding for an app that already sits at the cap --
-  without letting permissions dominate: even fully out of character they stay
-  inside the Low band. Set the adjustment to 0 for the cap-only behaviour.
-- The SMS, command-execution and dynamic-code-loading rules scale the same way
-  for their API family.
-- A dedicated rule reports permissions that policy forbids for the category,
-  and every finding carries its tier and multiplier in the evidence so the
-  arithmetic is auditable.
-
-Compliance is kept on its own axis rather than folded into the score. The score
-remains the sum of the findings -- which is what the report explains -- but a
-policy violation is reported in its own `policy_violations` field and raises the
-reported risk band (`risk_level_basis` records whether the band came from the
-score or from the policy floor). A child-directed app requesting location or
-contacts therefore cannot be presented as a low-risk result, and the report says
-explicitly why the band was raised.
-
-`denied` permissions are deliberately limited to child-directed apps, where
-Google Play's Families policy and COPPA provide a citable basis. They are
-excluded from the permission finding so the same evidence is never counted
-twice.
-
-The dashboard and the generated report both show the category, how it was
-determined, the confidence, and the evidence behind it. Because risk is now
-relative to context, a low score means "unremarkable *for this kind of app*",
-not "safe".
-
-## Calibration against real applications
-
-The scoring path was validated by running real, known-benign applications
-through it (a FOSS notes app and the F-Droid client). That surfaced four
-false-positive sources, each of which is now fixed and covered by tests:
-
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| "Dynamic code loading" (+12) on almost every app | `ClassLoader; loadClass` listed as suspicious in `feature_extraction/sensitive_apis.py`, although the base class loader is the standard class-resolution path | Pattern removed; the file-backed `DexClassLoader` / `PathClassLoader` / `InMemoryDexClassLoader` patterns remain |
-| 141 "hardcoded IP addresses" in one app | `IP_RE` matched the first four numbers of a longer dotted run, so X.509/ASN.1 object identifiers were extracted as IPs (`1.3.6.1.4.1.44` produced `1.3.6.1`) | Lookarounds require a complete, delimited dotted-decimal run |
-| "Code obfuscation" (+9) on a non-obfuscated FOSS app | `string_encryption_suspected` was true whenever *any* high-entropy string existed | Requires both a count floor and a share of the string pool (`obfuscation_heuristics.MIN_ENTROPY_RATIO`) |
-| An app store scored as if installing apps were suspicious | No category described package managers | `app_store` category added, where installing and querying packages is expected |
-
-Also corrected: URL-shortener matching was substring-based, so `www.reddit.com`
-was reported as a shortened link (it contains `t.co`), and loopback URLs such as
-`http://127.0.0.1` were flagged even though `PRIVATE_IP_PREFIXES` already
-declared loopback benign for the IP rule. Exported launcher activities are now
-excluded from the exported-component finding, because Android requires an
-app's entry point to be exported.
-
-Measured effect on the two benign applications:
-
-| Application | Before | After |
-| --- | --- | --- |
-| Fossify Notes (FOSS notes app, inferred `productivity`) | 45 / Medium | **24 / Low** |
-| F-Droid client (inferred `app_store`) | 75 / High | **45 / Medium** |
-
-The remaining contributors on the F-Droid client are defensible rather than
-mistaken: a self-signed certificate (every F-Droid app has one), bundled native
-libraries, exported components, command execution (it drives the platform
-package manager), and a handful of plain-HTTP library documentation URLs. The
-entropy thresholds are a reasoned starting point, not a calibrated result --
-they should be revisited against a labelled corpus.
-
-## Tests
-
-```bash
-python -m pytest -q
-MAS_TEST_APK=/path/to/test.apk python -m pytest -q
-```
-
-The optional real-APK test exercises upload, analysis, dashboard rendering,
-and saved report generation. Use a trusted test APK. The original ingestion
-module notes follow below.
-
----
-
-# Person A — Ingestion & Parsing Module
-
-## What this module does
-
-Takes a raw `.apk` file and produces a single structured JSON object containing:
-
-1. File-level metadata and integrity hashes
-2. Full AndroidManifest.xml parsing (permissions, components, intent filters)
-3. Certificate/signing analysis, including debug-certificate detection
-4. Resource/asset inspection for embedded payloads
-5. Structural anomaly checks (zip bombs, duplicate entries)
-
-This JSON is the **input contract** for Person B (feature extraction) and,
-downstream, Person C (scoring engine). Any change to this schema must be
-communicated to both before merging.
-
-## Setup
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Usage
-
-```bash
-python apk_parser.py sample.apk
-python apk_parser.py sample.apk -o result.json
-```
-
-Exit code is `0` on success, `1` if the APK was invalid or failed to parse
-(status will explain why — see schema below).
-
-## Output schema
-
-```jsonc
 {
-  "file_name": "sample.apk",
-  "file_size_bytes": 4213556,
-  "sha256": "…",
-  "md5": "…",
-  "status": "success",          // "success" | "invalid" | "parse_error"
-  "error": null,                // populated when status != "success"
-  "is_signed": true,
-
-  "manifest": {
-    "package_name": "com.example.app",
-    "app_name": "Example",
-    "version_name": "1.2.0",
-    "version_code": 12,
-    "min_sdk": 21,
-    "target_sdk": 34,
-    "max_sdk": null,
-    "permissions": ["android.permission.SEND_SMS", "..."],
-    "declared_permissions": ["..."],
-    "custom_permissions": ["..."],
-
-    "activities": [
-      {
-        "name": "com.example.app.MainActivity",
-        "exported": true,
-        "has_permission": false,
-        "intent_filters": { "action": ["android.intent.action.MAIN"], "category": ["..."] }
-      }
-    ],
-    "services": [ /* same shape as activities */ ],
-    "receivers": [ /* same shape as activities */ ],
-    "providers": ["..."],
-
-    "main_activity": "com.example.app.MainActivity",
-    "is_multidex": false,
-    "libraries": ["..."],
-    "uses_features": ["android.hardware.camera", "..."],
-
-    "unprotected_exported_components": [
-      { "type": "receiver", "name": "com.example.app.SmsReceiver" }
-    ],
-    "has_persistence_receiver": true,
-    "persistence_receivers": ["com.example.app.BootReceiver"]
-  },
-
-  "certificates": [
-    {
-      "subject": "CN=Example Corp",
-      "issuer": "CN=Example Corp",
-      "serial_number": "123456789",
-      "not_before": "2020-01-01 00:00:00",
-      "not_after": "2050-01-01 00:00:00",
-      "sha256_fingerprint": "AB:CD:...",
-      "is_self_signed": true,
-      "is_debug_certificate": false
-    }
-  ],
-  "signature_schemes": { "v1_signed": true, "v2_signed": true, "v3_signed": false },
-
-  "assets_and_resources": {
-    "suspicious_embedded_files": [
-      { "path": "assets/payload.dex", "size_bytes": 20480, "compressed_size_bytes": 8192 }
-    ],
-    "native_libraries": ["lib/arm64-v8a/libnative.so"],
-    "architectures": ["arm64-v8a", "armeabi-v7a"],
-    "asset_file_count": 12,
-    "res_file_count": 340
-  },
-
-  "structural_anomalies": [
-    { "type": "duplicate_zip_entries", "detail": ["res/layout/main.xml"], "severity": "high" }
-  ]
+  "app_context": {
+    "category": "education"
+  }
 }
 ```
 
-## Security findings this module surfaces (for Person C's scoring rules)
+This fragment is added to an existing analysis object. A declared category takes precedence. Without one, inference uses known package mappings, package/label keywords and permission/API evidence. The inferred category is applied only when its confidence meets the configured threshold; otherwise scoring remains category-neutral and candidate categories are available for review.
 
-| Field | Why it matters |
-|---|---|
-| `unprotected_exported_components` | Exported activity/service/receiver with no permission guard — any app on the device can invoke it |
-| `has_persistence_receiver` | `BOOT_COMPLETED`/`QUICKBOOT_POWERON` receivers indicate the app tries to auto-start, a common malware persistence technique |
-| `certificates[].is_debug_certificate` | Debug-signed "release" apps are a red flag — shouldn't happen in production |
-| `certificates[].is_self_signed` | Common in malware since there's no CA vetting, though many legitimate small apps also self-sign |
-| `signature_schemes` | Apps only using old, weaker V1 signing may be easier to tamper with |
-| `assets_and_resources.suspicious_embedded_files` | Secondary `.dex`/`.apk`/`.so` files bundled outside expected locations — classic payload-dropping technique |
-| `structural_anomalies` | Zip bombs / duplicate entries — parser-confusion and DoS techniques, also used to evade some scanners |
+Declaring `"category": "unknown"` opts out of inference. `CONTEXT_INFERENCE_ENABLED = False` disables it globally.
+
+Category-specific policy findings are reported separately. The configured policy floor can raise the reported risk band without increasing the numeric score; `risk_level_basis` explains whether the score or that floor determined the band. These are local configured policy checks, not a legal or app-store compliance certification.
+
+A low score means fewer matched indicators under the current rules and context. It does not establish that an application is safe.
+
+## Finding correlation
+
+[correlation_rules.json](Framework/android-malware-framework/correlation_rules.json) is the source of matching conditions and interpretations. The engine loads and validates the catalog before evaluating normalized features. Invalid catalogs raise explicit errors.
+
+Supported associations include:
+
+- Declared SMS access and network capability.
+- Declared audio/video capture, background-location and overlay/installation capabilities.
+- SMS permission combined with an SMS sending API.
+- Contacts, location or device-identifier access combined with Internet permission and a suspicious destination.
+- Dynamic loading combined with reflection or shell/process execution.
+- Embedded secondary code combined with a dynamic loader.
+- An unprotected exported component whose class references a matched sensitive API.
+
+Every result carries its rule ID, catalog version, title, potential impact, confidence, evidence, limitations, verification steps, legitimate-use exceptions, platform constraints, reference mappings and validation metadata.
+
+| Evidence level | Meaning |
+| --- | --- |
+| `declared_capability` | Related permissions are declared |
+| `static_cooccurrence` | Required signals coexist in the APK |
+| `shared_caller` | Matched API groups share an exact calling method |
+| `same_class_association` | A matched API caller class is an unprotected exported component |
+
+API combinations without shared callers retain low confidence; a shared caller raises their qualitative confidence to moderate. Correlations add **no score points**, avoiding duplicate counting of the underlying findings.
+
+All rules currently remain `unvalidated`, with null detection metrics. Android, OWASP and MITRE references describe platform behavior or related threats; they do not validate the exact matching heuristics. No result proves a runtime attack or a source-to-sink data flow. See the [catalog guide](Framework/android-malware-framework/CORRELATION_RULES.md) for condition definitions, reference interpretation and validation requirements.
+
+## Configuration
+
+[config.py](Framework/android-malware-framework/config.py) contains score bands, rule weights, sensitive permissions, API categorization, URL/IP indicators, category definitions and context settings. Key settings include:
+
+- `MAX_SCORE`, `RISK_LEVELS` and `WEIGHTS`.
+- `CONTEXT_TIER_MULTIPLIERS` and `CONTEXT_PERMISSION_ADJUST_CAP`.
+- `CONTEXT_POLICY_MIN_LEVEL`.
+- `CONTEXT_INFERENCE_ENABLED` and `CONTEXT_INFERENCE_MIN_CONFIDENCE`.
+- `APP_CATEGORIES`, `KNOWN_APP_CATEGORIES` and `APP_CATEGORY_KEYWORDS`.
+
+Edit correlation behavior in the JSON catalog, keeping supported condition keys and required metadata intact. Bump `catalog_version` when matching conditions or interpretations change. Change `source_reviewed_on` only after reviewing the references.
 
 ## Testing
 
-See `test_apk_parser.py`. Run with:
+Run the full suite from the repository root:
 
 ```bash
-pytest test_apk_parser.py -v
+python -m pytest -q
 ```
 
-Get test samples:
-- **Benign**: any APK from [F-Droid](https://f-droid.org) (open source, safe)
-- **Malicious**: only from a proper research corpus (e.g. CICMalDroid2020,
-  Drebin), inside an isolated VM with networking disabled. Never run/install
-  these files — this module only reads the archive statically.
+The latest verified default run completed with **246 passed and 1 skipped**. The skipped test is the optional real-APK dashboard/report integration test, which requires `MAS_TEST_APK`. A duplicate-ZIP-entry warning is expected from the parser test that deliberately creates one.
 
-## Known limitations / things to revisit
+Enable the optional integration test with an APK:
 
-- `_is_exported` uses the pre-API-31 default-exported behavior for components
-  with intent filters; from Android 12+ apps must declare `exported`
-  explicitly, so this heuristic may need adjusting once we test against newer
-  target-SDK samples.
-- Certificate parsing assumes standard v1-v3 JAR/APK signing; edge cases in
-  malformed or adversarially crafted signature blocks may raise exceptions
-  (caught and reported, but worth expanding test coverage on).
+```powershell
+$env:MAS_TEST_APK = (Resolve-Path .\samples\org.fossify.notes.apk).Path
+.\.venv\Scripts\python.exe -m pytest -q
+Remove-Item Env:\MAS_TEST_APK
+```
+
+```bash
+MAS_TEST_APK="$PWD/samples/org.fossify.notes.apk" python -m pytest -q
+```
+
+That test covers upload, extraction, JSON persistence, dashboard rendering, saved HTML reporting and APK cleanup. Test coverage also includes invalid archives, parser behavior, feature extraction, scoring, app-category context, catalog validation, correlation matching and escaped report evidence.
+
+The repository includes Fossify Notes and F-Droid APKs for local exercises, plus two synthetic JSON examples. Implementation tests verify program behavior; they do not measure malware-detection precision or recall.
+
+## Limitations and troubleshooting
+
+- Static analysis cannot establish runtime permission grants, user consent, entry-point reachability, actual endpoint use or verified data flow.
+- Packed, encrypted, dynamically downloaded or native code can hide behavior from DEX inspection. Packer and certificate-parser issues are reported as warnings where available.
+- Manifest exported-component inference includes legacy defaults; modern target-SDK behavior and malformed signing blocks need careful interpretation.
+- Category inference is heuristic. Declare a known category when appropriate, and review legitimate-use exceptions before interpreting findings.
+- Self-signed certificates, native libraries, reflection and dynamic loading can be normal. The engine filters several common false positives, including launcher exports, loopback destinations, dotted object identifiers and ordinary class-loader references, but broader accuracy has not been established.
+- CLI reports are self-contained. Dashboard styling/charts may need network access for externally loaded assets.
+- Analysis has no dynamic sandbox, antivirus-signature feed, machine-learning model or integrated source-to-sink analyzer.
+
+| Problem | What to check |
+| --- | --- |
+| Missing Python module | Install the root requirements using the same virtual-environment Python used to launch the project |
+| Port 5000 is occupied | Launch with `python run.py --port 5001` |
+| Upload rejected | Use `.apk` or valid analysis `.json` within the 100 MB limit |
+| APK analysis fails | Check archive validity and the reported parse/DEX error; no complete assessment is produced for failed extraction |
+| JSON accepted but findings are sparse | Compare its structure with the bundled schema v1.0 examples; missing evidence cannot support matching rules |
+| Catalog raises `ValueError` | Check IDs, condition keys, nonempty API groups and required unvalidated metadata against the catalog guide |
+| Integration test skipped | Set `MAS_TEST_APK` to an existing sample APK |
+| Report missing from Git | Runtime reports, uploads and output artifacts are intentionally ignored; generate them locally |
+
+The completed deliverable is the integrated static-analysis workflow, dashboard, reporting system, configurable scoring and catalog-driven correlations. Detection-accuracy validation and runtime analysis are outside the implemented project scope.
